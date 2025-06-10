@@ -1,0 +1,160 @@
+import hashlib
+import tkinter as tk
+from tkinter import messagebox, ttk
+import pyperclip  # تأكد من تثبيت هذه المكتبة باستخدام: pip install pyperclip
+
+
+class KeyGeneratorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("أداة إنشاء مفاتيح التفعيل")
+        self.root.geometry("600x400")
+        self.root.resizable(True, True)
+
+        # إنشاء الإطار الرئيسي
+        main_frame = ttk.Frame(root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # عنوان البرنامج
+        ttk.Label(main_frame, text="أداة إنشاء مفاتيح التفعيل", font=("Arial", 16, "bold")).pack(pady=10)
+
+        # إنشاء إطار لإدخال معرف الجهاز
+        input_frame = ttk.Frame(main_frame)
+        input_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(input_frame, text="معرف الجهاز:", font=("Arial", 12)).pack(side=tk.LEFT, padx=5)
+
+        self.machine_id_entry = ttk.Entry(input_frame, width=50, font=("Arial", 12))
+        self.machine_id_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+
+        # إضافة زر اللصق بجانب حقل الإدخال
+        paste_button = ttk.Button(input_frame, text="لصق", command=self.paste_from_clipboard)
+        paste_button.pack(side=tk.LEFT, padx=5)
+
+        # إطار لتحديد مدة الترخيص
+        duration_frame = ttk.Frame(main_frame)
+        duration_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(duration_frame, text="مدة الترخيص (بالأيام):", font=("Arial", 12)).pack(side=tk.LEFT, padx=5)
+
+        self.duration_entry = ttk.Entry(duration_frame, width=10, font=("Arial", 12))
+        self.duration_entry.insert(0, "365")  # القيمة الافتراضية سنة واحدة
+        self.duration_entry.pack(side=tk.LEFT, padx=5)
+
+        # إطار الأزرار
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=20)
+
+        ttk.Button(btn_frame, text="إنشاء مفتاح التفعيل", command=self.generate_key).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="نسخ المفتاح", command=self.copy_key).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="مسح الحقول", command=self.clear_fields).pack(side=tk.LEFT, padx=5)
+
+        # حقل عرض المفتاح
+        key_frame = ttk.LabelFrame(main_frame, text="مفتاح التفعيل")
+        key_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        self.key_text = tk.Text(key_frame, height=5, width=60, font=("Courier", 12))
+        self.key_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.key_text.config(state=tk.DISABLED)
+
+        # حقل التعليمات
+        ttk.Label(main_frame,
+                  text="تطوير المهندس / عبدالرحمن جفال الشمري",
+                  font=("Arial", 10), wraplength=550).pack(pady=10)
+
+        # حقل السجل
+        log_frame = ttk.LabelFrame(main_frame, text="سجل مفتاح المستفيد")
+        log_frame.pack(fill=tk.X, pady=10)
+
+        self.log_text = tk.Text(log_frame, height=3, width=60, font=("Arial", 10))
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.log_text.config(state=tk.DISABLED)
+
+    def paste_from_clipboard(self):
+        """دالة للصق من الحافظة إلى حقل معرف الجهاز"""
+        try:
+            clipboard_text = pyperclip.paste()
+            self.machine_id_entry.delete(0, tk.END)
+            self.machine_id_entry.insert(0, clipboard_text)
+        except Exception as e:
+            messagebox.showerror("خطأ", f"فشل اللصق: {str(e)}")
+
+    def generate_key(self):
+        machine_id = self.machine_id_entry.get().strip()
+        if not machine_id:
+            messagebox.showerror("خطأ", "يرجى إدخال معرف الجهاز")
+            return
+
+        try:
+            duration = int(self.duration_entry.get().strip())
+            if duration <= 0:
+                messagebox.showerror("خطأ", "يجب أن تكون مدة الترخيص رقماً موجباً")
+                return
+        except ValueError:
+            messagebox.showerror("خطأ", "يرجى إدخال رقم صحيح لمدة الترخيص")
+            return
+
+        activation_key = self.generate_activation_key(machine_id)
+
+        # عرض المفتاح في حقل النص
+        self.key_text.config(state=tk.NORMAL)
+        self.key_text.delete(1.0, tk.END)
+        self.key_text.insert(tk.END, activation_key)
+        self.key_text.config(state=tk.DISABLED)
+
+        # إضافة المفتاح إلى السجل
+        self.log_text.config(state=tk.NORMAL)
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{now}] معرف: {machine_id[:8]}... | المدة: {duration} يوم\n"
+        self.log_text.insert(tk.END, log_entry)
+        self.log_text.see(tk.END)  # التمرير إلى نهاية السجل
+        self.log_text.config(state=tk.DISABLED)
+
+        messagebox.showinfo("تم بنجاح", f"تم إنشاء مفتاح التفعيل بنجاح لمدة {duration} يوم")
+
+    def copy_key(self):
+        try:
+            key = self.key_text.get(1.0, tk.END).strip()
+            if key:
+                pyperclip.copy(key)
+                messagebox.showinfo("تم النسخ", "تم نسخ مفتاح التفعيل إلى الحافظة")
+            else:
+                messagebox.showwarning("تحذير", "لا يوجد مفتاح للنسخ")
+        except Exception as e:
+            messagebox.showerror("خطأ", f"حدث خطأ أثناء النسخ: {str(e)}")
+
+    def clear_fields(self):
+        self.machine_id_entry.delete(0, tk.END)
+        self.duration_entry.delete(0, tk.END)
+        self.duration_entry.insert(0, "365")  # إعادة تعيين المدة الافتراضية
+        self.key_text.config(state=tk.NORMAL)
+        self.key_text.delete(1.0, tk.END)
+        self.key_text.config(state=tk.DISABLED)
+
+    def generate_activation_key(self, machine_id):
+        """توليد مفتاح تفعيل للجهاز - يجب أن تكون نفس الخوارزمية الموجودة في ملف license_manager.py"""
+        # كلمة سرية خاصة بك - يجب أن تكون متطابقة مع الكلمة في ملف license_manager.py
+        secret_key = "jaffal0541894404"  # قم بتغيير هذه الكلمة إلى كلمة قوية من اختيارك
+
+        # دمج معرف الجهاز مع الكلمة السرية
+        data = f"{machine_id}:{secret_key}:attendance_system"
+
+        # إنشاء المفتاح المشفر
+        return hashlib.sha512(data.encode()).hexdigest()
+
+
+
+# تشغيل البرنامج
+if __name__ == "__main__":
+    # التأكد من تثبيت مكتبة pyperclip
+    try:
+        import pyperclip
+    except ImportError:
+        print("يرجى تثبيت مكتبة pyperclip أولاً باستخدام الأمر: pip install pyperclip")
+        exit(1)
+
+    root = tk.Tk()
+    app = KeyGeneratorApp(root)
+    root.mainloop()
