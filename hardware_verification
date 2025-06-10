@@ -1,0 +1,198 @@
+import hashlib
+import uuid
+import platform
+import os
+import sqlite3
+import datetime
+
+
+class LicenseManager:
+    def __init__(self):
+        # إنشاء مجلد لتخزين بيانات الترخيص إذا لم يكن موجوداً
+        self.app_dir = os.path.join(os.path.expanduser("~"), ".attendance_app")
+        if not os.path.exists(self.app_dir):
+            os.makedirs(self.app_dir)
+
+        self.db_path = os.path.join(self.app_dir, "license.db")
+        self.setup_database()
+
+    def setup_database(self):
+        """إنشاء قاعدة بيانات لتخزين معلومات الترخيص"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # إنشاء جدول الترخيص إذا لم يكن موجوداً
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS license (
+            id INTEGER PRIMARY KEY,
+            machine_id TEXT NOT NULL,
+            activation_key TEXT NOT NULL,
+            activation_date TEXT NOT NULL,
+            expiry_date TEXT,
+            last_check TEXT NOT NULL
+        )
+        ''')
+
+        conn.commit()
+        conn.close()
+
+    def get_machine_id(self):
+        """إنشاء معرف فريد للجهاز الحالي"""
+        # جمع معلومات مختلفة عن الجهاز
+        mac_address = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff)
+                                for elements in range(0, 2 * 6, 8)][::-1])
+        processor = platform.processor()
+        system_info = platform.system() + platform.release()
+        username = os.environ.get('USERNAME', '')
+        computer_name = platform.node()
+
+        # دمج كل هذه المعلومات
+        machine_info = f"{mac_address}:{processor}:{system_info}:{username}:{computer_name}"
+
+        # تشفير المعلومات للحصول على معرف فريد
+        return hashlib.sha256(machine_info.encode()).hexdigest()
+
+    def is_licensed(self):
+        """التحقق ما إذا كان الجهاز الحالي مرخصاً"""
+        machine_id = self.get_machine_id()
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # البحث عن ترخيص للجهاز الحالي
+            cursor.execute("SELECT activation_key, expiry_date FROM license WHERE machine_id=?", (machine_id,))
+            result = cursor.fetchone()
+
+            if not result:
+                conn.close()
+                return False
+
+            activation_key, expiry_date = result
+
+            # تحديث تاريخ آخر فحص
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("UPDATE license SET last_check=? WHERE machine_id=?", (now, machine_id))
+            conn.commit()
+            conn.close()
+
+            # التحقق من تاريخ انتهاء الصلاحية إذا كان موجوداً
+            if expiry_date:
+                expiry = datetime.datetime.strptime(expiry_date, "%Y-%m-%d")
+                if datetime.datetime.now().date() > expiry.date():
+                    return False
+
+            # التحقق من صحة مفتاح التفعيل
+            expected_key = self.generate_activation_key(machine_id)
+            return activation_key == expected_key
+
+        except Exception as e:
+            print(f"حدث خطأ أثناء التحقق من الترخيص: {str(e)}")
+            return False
+
+    def generate_activation_key(self, machine_id):
+        """توليد مفتاح تفعيل للجهاز"""
+        # كلمة سرية خاصة بك - غير هذه الكلمة وحافظ عليها سرية
+        secret_key = "jaffal0541894404"
+
+        # دمج معرف الجهاز مع الكلمة السرية
+        data = f"{machine_id}:{secret_key}:attendance_system"
+
+        # إنشاء المفتاح المشفر
+        return hashlib.sha512(data.encode()).hexdigest()
+
+    def activate(self, activation_key, days=365):
+        """تفعيل البرنامج على هذا الجهاز"""
+        # التأكد من وجود مفتاح تفعيل
+        if not activation_key:
+            return False
+
+        machine_id = self.get_machine_id()
+        expected_key = self.generate_activation_key(machine_id)
+
+        # التحقق من صحة المفتاح المقدم
+        if activation_key != expected_key:
+            return False
+
+        # حساب تاريخ انتهاء الصلاحية
+        activation_date = datetime.datetime.now()
+        expiry_date = (activation_date + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # التحقق إذا كان الجهاز مسجلاً من قبل
+            cursor.execute("SELECT id FROM license WHERE machine_id=?", (machine_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                # تحديث الترخيص الموجود
+                cursor.execute("""
+                    UPDATE license 
+                    SET activation_key=?, activation_date=?, expiry_date=?, last_check=?
+                    WHERE machine_id=?
+                """, (
+                    activation_key,
+                    activation_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    expiry_date,
+                    activation_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    machine_id
+                ))
+            else:
+                # إنشاء ترخيص جديد
+                cursor.execute("""
+                    INSERT INTO license 
+                    (machine_id, activation_key, activation_date, expiry_date, last_check)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    machine_id,
+                    activation_key,
+                    activation_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    expiry_date,
+                    activation_date.strftime("%Y-%m-%d %H:%M:%S")
+                ))
+
+            conn.commit()
+            conn.close()
+            return True
+
+        except Exception as e:
+            print(f"حدث خطأ أثناء تفعيل البرنامج: {str(e)}")
+            return False
+
+    def get_activation_info(self):
+        """الحصول على معلومات التفعيل لهذا الجهاز"""
+        machine_id = self.get_machine_id()
+        return {
+            'machine_id': machine_id
+        }
+
+
+# توفير نقطة دخول للتحقق من الترخيص
+def check_license():
+    manager = LicenseManager()
+    return manager.is_licensed()
+
+
+# توفير دالة للتفعيل
+def activate_software(activation_key):
+    if not activation_key:
+        return False
+
+    # طباعة تشخيصية
+    print(f"محاولة تفعيل بالمفتاح: {activation_key[:10]}...")
+
+    manager = LicenseManager()
+    success = manager.activate(activation_key)
+
+    # طباعة نتيجة التفعيل
+    print(f"نتيجة التفعيل: {success}")
+
+    return success
+
+
+# توفير دالة للحصول على معلومات التفعيل
+def get_activation_info():
+    manager = LicenseManager()
+    return manager.get_activation_info()
